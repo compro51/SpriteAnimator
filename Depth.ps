@@ -1,0 +1,27 @@
+// Globals
+
+Texture2D shaderTexture : register(t0);
+SamplerState SampleType : register(s0);
+
+// Typedefs
+
+struct PixelInputType
+{
+	float4 position : SV_POSITION;
+	float2 tex : TEXCOORD1;
+	float4 color : COLOR;
+};
+
+float DepthPixelShader(PixelInputType input) : SV_TARGET
+{
+	float4 color = saturate(shaderTexture.Sample(SampleType, input.tex) * input.color);
+
+	if(color.a < 0.02)
+	{
+		discard;
+	}
+
+	float depthValue = input.position.z / input.position.w;
+
+	return depthValue;
+}

@@ -1,0 +1,39 @@
+// Sprite Shader
+
+// Globals
+
+Texture2D shaderTexture;
+SamplerState SampleType;
+
+cbuffer TextureBuffer
+{
+	uint   textureValid;
+	float3 padding;
+};
+
+// Typedefs
+
+struct PixelInputType
+{
+	float4 position : SV_POSITION;
+	float2 tex :      TEXCOORD0;
+	float4 color :    COLOR;
+};
+
+float4 SpriteShader(PixelInputType input) : SV_TARGET
+{
+	float4 textureColor = float4(1.0, 1.0, 1.0, 1.0);
+	if(textureValid > 0)
+	{
+		textureColor = shaderTexture.Sample(SampleType, input.tex);
+	}
+
+	float4 finalColor = saturate(textureColor * input.color);
+
+	if(finalColor.a < 0.02)
+	{
+		discard;
+	}
+
+	return finalColor;
+}

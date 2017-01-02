@@ -1,0 +1,194 @@
+// My Pixel Shader
+
+// Globals
+
+Texture2D shaderTexture     : register(t0);
+Texture2D reflectionTexture : register(t1);
+Texture2D depthMapTexture   : register(t2);
+
+SamplerState SampleType      : register(s0);
+SamplerState SampleTypeClamp : register(s1);
+SamplerState SampleTypeWrap  : register(s2);
+
+cbuffer FogBufferP
+{
+	float4 fogColor;
+};
+
+cbuffer ReflectionBuffer
+{
+	uint reflectionEnabled;
+	float3 padding3;
+};
+
+cbuffer LightBuffer
+{
+	float4 lightColor;
+	float3 lightDirection;
+	uint   lightEnabled;
+	uint   shadowEnabled;
+	float3 padding4;
+};
+
+cbuffer MaterialBuffer
+{
+	float4 diffuseColor;
+	float4 ambientColor;
+	float4 specularColor;
+	float specularPower;
+	float3 padding2;
+};
+
+// Typedefs
+
+struct PixelInputType
+{
+	float4 position : SV_POSITION;
+	float2 tex :      TEXCOORD0;
+	float3 normal :   NORMAL;
+	float4 color :    COLOR;
+	float3 viewDir :  TEXCOORD1;
+	float fogFactor : FOG;
+	float4 reflectionPosition : TEXCOORD2;
+	float4 lightViewPosition : TEXCOORD3;
+};
+
+float4 MyPixelShader(PixelInputType input) : SV_TARGET
+{
+	float4 color = saturate(shaderTexture.Sample(SampleType, input.tex) * input.color);
+
+	if(color.a < 0.02)
+	{
+		discard;
+	}
+
+	float colorAlpha = color.a;
+
+	if(reflectionEnabled != 0)
+	{
+		float2 reflectTexCoord = float2(0.0f, 0.0f);
+		reflectTexCoord.x =  input.reflectionPosition.x / input.reflectionPosition.w / 2.0f + 0.5f;
+		reflectTexCoord.y = -input.reflectionPosition.y / input.reflectionPosition.w / 2.0f + 0.5f;
+
+		float4 reflectionColor = saturate(reflectionTexture.Sample(SampleType, reflectTexCoord) * input.color);
+
+		color = lerp(color, reflectionColor, 0.15f);
+	}
+
+	if(lightEnabled != 0)
+	{
+		color *= diffuseColor;
+
+		float4 phong = float4(0.0f, 0.0f, 0.0f, 0.0f);
+
+		float3 lightDir = -lightDirection;
+		float lightIntensity = dot(input.normal, lightDir);
+
+		if(shadowEnabled != 0)
+		{
+			float2 projectTexCoord = float2(0.0f, 0.0f);
+			projectTexCoord.x =  input.lightViewPosition.x / input.lightViewPosition.w / 2.0f + 0.5f;
+			projectTexCoord.y = -input.lightViewPosition.y / input.lightViewPosition.w / 2.0f + 0.5f;
+
+			float lightDepthValue = input.lightViewPosition.z / input.lightViewPosition.w - 0.0005f;
+
+			float shadowValue = 1.0f;
+			float2 projectCoord;
+			float nextValue = 1.0f / 2048.0f;
+
+			// Top
+			projectCoord.y = projectTexCoord.y + nextValue;
+			projectCoord.x = projectTexCoord.x;
+
+			if((saturate(projectCoord.x) == projectCoord.x) && (saturate(projectCoord.y) == projectCoord.y))
+			{
+				float depthValue = depthMapTexture.Sample(SampleTypeClamp, projectCoord).r;
+
+				if(lightDepthValue > depthValue)
+				{
+					shadowValue -= 0.2f;
+				}
+			}
+
+			// Bottom
+			projectCoord.y = projectTexCoord.y - nextValue;
+			projectCoord.x = projectTexCoord.x;
+
+			if((saturate(projectCoord.x) == projectCoord.x) && (saturate(projectCoord.y) == projectCoord.y))
+			{
+				float depthValue = depthMapTexture.Sample(SampleTypeClamp, projectCoord).r;
+
+				if(lightDepthValue > depthValue)
+				{
+					shadowValue -= 0.2f;
+				}
+			}
+
+			// Left
+			projectCoord.y = projectTexCoord.y;
+			projectCoord.x = projectTexCoord.x - nextValue;
+
+			if((saturate(projectCoord.x) == projectCoord.x) && (saturate(projectCoord.y) == projectCoord.y))
+			{
+				float depthValue = depthMapTexture.Sample(SampleTypeClamp, projectCoord).r;
+
+				if(lightDepthValue > depthValue)
+				{
+					shadowValue -= 0.2f;
+				}
+			}
+
+			// Right
+			projectCoord.y = projectTexCoord.y;
+			projectCoord.x = projectTexCoord.x + nextValue;
+
+			if((saturate(projectCoord.x) == projectCoord.x) && (saturate(projectCoord.y) == projectCoord.y))
+			{
+				float depthValue = depthMapTexture.Sample(SampleTypeClamp, projectCoord).r;
+
+				if(lightDepthValue > depthValue)
+				{
+					shadowValue -= 0.2f;
+				}
+			}
+
+			// Center
+			projectCoord.y = projectTexCoord.y;
+			projectCoord.x = projectTexCoord.x;
+
+			if((saturate(projectCoord.x) == projectCoord.x) && (saturate(projectCoord.y) == projectCoord.y))
+			{
+				float depthValue = depthMapTexture.Sample(SampleTypeClamp, projectCoord).r;
+
+				if(lightDepthValue > depthValue)
+				{
+					shadowValue -= 0.2f;
+				}
+			}
+
+			lightIntensity *= shadowValue;
+		}
+
+		if(lightIntensity > 0.0f)
+		{
+			phong = saturate(color * lightIntensity);
+
+			if(specularPower > 0.0f)
+			{
+				float3 reflection = normalize(2 * lightIntensity * input.normal - lightDir);
+				float specular = pow(saturate(dot(reflection, input.viewDir)), specularPower);
+
+				phong += saturate(specularColor * specular);
+			}
+		}
+
+		float4 lColor = saturate(lightColor * phong);
+
+		color = saturate(color * ambientColor + lColor);
+	}
+
+	color = input.fogFactor * color + (1.0f - input.fogFactor) * fogColor;
+	color.a = colorAlpha;
+
+	return color;
+}
